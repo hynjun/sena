@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Escape from</title>
+<style>html,body{margin:0} :root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)} [hidden]{display:none!important}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500&family=IBM+Plex+Mono:wght@400&family=Nanum+Myeongjo:wght@400;700&family=Jost:wght@300&display=swap">
+<style>
+/* Layout: full-bleed game world; status card top-left, tower minimap top-right, action bottom-right, touch pad bottom-left on phones. Tower map is a full-screen white sheet. */
+:root {
+  --sky: #c4dceb;
+  --card: rgba(22, 30, 28, 0.72);
+  --line: rgba(255, 255, 255, 0.14);
+  --fg: #f2efe6;
+  --muted: #b9c2bc;
+  --accent: #e0683a;
+  --sheet: #f7f6f2;
+  --ink: #23211d;
+  --ink-muted: #75716a;
+  --rule: #e2dfd8;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--sky); color: var(--fg); font-family: var(--font-body); overflow: hidden; user-select: none; -webkit-user-select: none; }
+#scene, #tmCanvas { position: absolute; inset: 0; }
+#scene { position: fixed; }
+#scene canvas, #tmCanvas canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.card, .minimap, .chip {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+.card { position: fixed; top: calc(16px + env(safe-area-inset-top, 0px)); }
+.side {
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 6px; justify-items: stretch;
+}
+.chip {
+  font: inherit; font-size: 12px; color: var(--fg);
+  padding: 7px 10px; cursor: pointer; text-align: left;
+}
+.chip:hover { border-color: rgba(255, 255, 255, 0.32); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card { left: max(16px, env(safe-area-inset-left, 0px)); padding: 12px 14px; display: grid; gap: 4px; max-width: calc(100vw - 32px - 150px); }
+.floor { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--accent); }
+.card h1 { margin: 0; font-size: 16px; font-weight: 500; }
+.mode { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.keys { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.7; }
+.keys kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--fg); }
+.minimap {
+  padding: 10px 10px 8px; width: 132px;
+  display: grid; gap: 6px;
+  font: inherit; color: var(--fg); text-align: left; cursor: pointer;
+}
+.minimap:hover { border-color: rgba(255, 255, 255, 0.32); }
+.minimap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.minimap .label { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; display: flex; justify-content: space-between; }
+.minimap .label span { font-family: var(--font-mono); color: var(--fg); }
+.minimap svg { display: block; width: 100%; height: auto; }
+.minimap .here { font-size: 12px; }
+.minimap .here b { color: var(--accent); font-weight: 500; font-family: var(--font-mono); }
+.minimap .open { font-size: 11px; color: var(--muted); }
+.minimap .next { font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: no-preference) { .cur { animation: pulse 1.6s ease-in-out infinite; } }
+.action {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  font: inherit; font-size: 14px; font-weight: 500;
+  color: #1a0d07; background: var(--accent);
+  border: 0; border-radius: 999px; padding: 14px 20px; cursor: pointer;
+}
+.action:focus-visible, .pad button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: 10px 16px; font-size: 13px; max-width: min(460px, calc(100vw - 32px)); text-align: center;
+  transition: opacity 0.4s;
+}
+.toast.off { opacity: 0; pointer-events: none; }
+.pad {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: none;
+  grid-template-columns: repeat(4, 56px); grid-template-rows: repeat(2, 56px); gap: 6px;
+}
+.pad button { font: inherit; font-size: 18px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 12px; touch-action: none; }
+.pad .up { grid-column: 2; grid-row: 1; }
+.pad .left { grid-column: 1; grid-row: 2; }
+.pad .down { grid-column: 2; grid-row: 2; }
+.pad .right { grid-column: 3; grid-row: 2; }
+.pad .sup { grid-column: 4; grid-row: 1; }
+.pad .sdown { grid-column: 4; grid-row: 2; }
+.underwater { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s; background: radial-gradient(ellipse at 50% 30%, rgba(80, 200, 210, 0.12), rgba(6, 60, 80, 0.38)); }
+.underwater.on { opacity: 1; }
+.caption {
+  position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  transform: translate(-50%, 8px);
+  min-width: min(300px, calc(100vw - 48px)); max-width: min(460px, calc(100vw - 48px));
+  padding: 14px 26px 16px; text-align: center;
+  background: rgba(22, 17, 12, 0.82); color: #f1e6cc;
+  border: 1px solid rgba(201, 162, 74, 0.7); border-radius: 2px;
+  box-shadow: inset 0 0 0 4px rgba(22, 17, 12, 0.82), inset 0 0 0 5px rgba(201, 162, 74, 0.35);
+  opacity: 0; transition: opacity 0.7s ease, transform 0.7s ease; pointer-events: none;
+}
+.caption.on { opacity: 1; transform: translate(-50%, 0); }
+.caption .cap-label { display: flex; align-items: center; justify-content: center; gap: 10px; font-family: var(--font-body); font-size: 11px; letter-spacing: 0.3em; color: #c9a24a; }
+.caption .cap-label::before, .caption .cap-label::after { content: ""; width: 28px; height: 1px; background: rgba(201, 162, 74, 0.7); }
+.caption .cap-main { margin-top: 8px; font-family: "Nanum Myeongjo", "Apple Myungjo", serif; font-weight: 700; font-size: 20px; letter-spacing: 0.04em; text-wrap: balance; }
+.caption .cap-sub { margin-top: 4px; font-family: "Nanum Myeongjo", "Apple Myungjo", serif; font-size: 14px; color: #cdbf9f; letter-spacing: 0.02em; text-wrap: balance; }
+/* 대화창: 화면 아래 검은 상자, 최대 두 문장 */
+.dialogue {
+  position: fixed; left: 50%; transform: translate(-50%, 10px);
+  bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+  width: min(720px, calc(100vw - 32px));
+  background: rgba(6, 6, 8, 0.9); color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px;
+  padding: 16px 22px 22px; z-index: 15;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+}
+.dialogue.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.dlg-name { position: absolute; top: -13px; left: 18px; background: #0c0c0e; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 4px; padding: 2px 10px; font-size: 13px; font-weight: 500; color: #f4e6c4; }
+.dlg-text { margin: 0; min-height: calc(1.65em * 2); font-size: 17px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
+.dlg-next {
+  position: absolute; right: 14px; bottom: -16px;
+  font: inherit; font-size: 13px; font-weight: 500; color: #0c0c0e;
+  background: #f4f2ec; border: 0; border-radius: 4px; padding: 5px 12px; cursor: pointer;
+  opacity: 0; visibility: hidden; transform: translateY(4px); transition: opacity 0.15s, transform 0.15s;
+}
+.dlg-next.on { opacity: 1; visibility: visible; transform: translateY(0); }
+.dlg-next:hover { background: #ffffff; }
+.dlg-next:focus-visible { outline: 2px solid #f4e6c4; outline-offset: 2px; }
+@media (max-width: 520px) { .dlg-text { font-size: 15px; } .dialogue { padding: 14px 16px 16px; } }
+@media (pointer: coarse) { .dialogue { bottom: calc(144px + env(safe-area-inset-bottom, 0px)); } }
+/* 인트로 */
+.intro { position: fixed; inset: 0; z-index: 50; background: #000; color: #f2f2f2; transition: opacity 0.6s; }
+.intro.gone { opacity: 0; pointer-events: none; }
+#introCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transition: opacity 0.8s; }
+.intro-prompt {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font: inherit; font-size: 16px; letter-spacing: 0.24em; color: #e8e8e8;
+  background: none; border: 0; padding: 16px 24px; cursor: pointer; transition: opacity 0.8s;
+}
+.intro-prompt.gone { opacity: 0; pointer-events: none; }
+@keyframes promptPulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .intro-prompt:not(.gone) { animation: promptPulse 2.6s ease-in-out infinite; } }
+.intro-prompt:focus-visible, .intro-skip:focus-visible { outline: 1px solid #888; outline-offset: 4px; }
+.intro-skip {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  font: inherit; font-size: 12px; letter-spacing: 0.18em; color: rgba(255, 255, 255, 0.55);
+  background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 2px; padding: 7px 12px; cursor: pointer;
+}
+.intro-skip:hover { color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+.intro-doors { position: absolute; inset: 0; display: none; pointer-events: none; }
+.intro-doors.show { display: block; }
+.intro-doors i {
+  position: absolute; top: 0; bottom: 0; width: 50.5%;
+  background: linear-gradient(90deg, #4a3618, #7a5a26 40%, #5a4220);
+  transition: transform 2.1s cubic-bezier(0.6, 0, 0.3, 1);
+}
+.intro-doors i::after { content: ""; position: absolute; top: 18%; bottom: 18%; width: 2px; background: #e2c278; opacity: 0.7; }
+.intro-doors .dl { left: 0; box-shadow: inset -3px 0 0 #c9a24a; }
+.intro-doors .dl::after { right: 18%; }
+.intro-doors .dr { right: 0; box-shadow: inset 3px 0 0 #c9a24a; }
+.intro-doors .dr::after { left: 18%; }
+.intro-doors.open .dl { transform: translateX(-101%); }
+.intro-doors.open .dr { transform: translateX(101%); }
+@media (pointer: coarse) { .caption { bottom: calc(200px + env(safe-area-inset-bottom, 0px)); } }
+.cross { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255, 240, 210, 0.9); box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.45); opacity: 0; pointer-events: none; }
+.cross.on { opacity: 1; }
+
+/* 엘리베이터 이동 화면 */
+.fade {
+  position: fixed; inset: 0; background: #0c0c0e; color: var(--fg);
+  display: grid; place-items: center; opacity: 0; pointer-events: none; transition: opacity 0.5s;
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.06em;
+}
+.fade.on { opacity: 1; pointer-events: auto; }
+
+/* 타워 지도 */
+.towermap { position: fixed; inset: 0; background: var(--sheet); color: var(--ink); color-scheme: light; z-index: 20; }
+.tm-head {
+  position: absolute; left: 0; right: 0; top: 0;
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; pointer-events: none;
+}
+.tm-head h2 { margin: 0; font-size: 20px; font-weight: 500; text-wrap: balance; }
+.tm-head p { margin: 4px 0 0; font-size: 13px; color: var(--ink-muted); }
+.tm-close {
+  pointer-events: auto; font: inherit; font-size: 13px; color: var(--ink);
+  background: #ffffff; border: 1px solid var(--rule); border-radius: 999px; padding: 8px 14px; cursor: pointer;
+}
+.tm-close:hover { border-color: var(--ink-muted); }
+.tm-close:focus-visible, .tm-go:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tm-info {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  width: min(360px, calc(100vw - 32px));
+  background: #ffffff; border: 1px solid var(--rule); border-radius: 12px;
+  padding: 14px 16px; display: grid; gap: 4px;
+}
+.tm-label { font-family: var(--font-mono); font-size: 12px; color: var(--accent); letter-spacing: 0.06em; }
+.tm-name { font-size: 20px; font-weight: 500; }
+.tm-status { font-size: 13px; color: var(--ink-muted); }
+.tm-go {
+  margin-top: 8px; font: inherit; font-size: 14px; font-weight: 500;
+  color: #1a0d07; background: var(--accent); border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer;
+}
+.tm-legend { font-size: 12px; color: var(--ink-muted); display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.tm-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+@media (pointer: coarse) {
+  .pad { display: grid; }
+  .keys { display: none; }
+  .toast { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (max-width: 520px) {
+  .minimap { width: 104px; padding: 8px; }
+  .minimap .open { display: none; }
+  .card { max-width: calc(100vw - 32px - 120px); padding: 10px 12px; }
+}
+.err { position: fixed; inset: 0; display: grid; place-items: center; color: #22302b; font-size: 14px; padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div class="underwater" id="underwater"></div>
+
+<div class="card">
+  <div class="floor" id="floorTag">1F · LOBBY</div>
+  <h1 id="floorName">로비 초원</h1>
+  <div class="mode" id="mode">서 있음</div>
+  <div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 · <kbd>Shift</kbd> 달리기 · <kbd>E</kbd> 차·엘리베이터<br>화면 클릭 후 마우스로 둘러보기 · <kbd>Esc</kbd> 마우스 풀기<br><kbd>V</kbd> 1·3인칭 · 휠 확대 · <kbd>M</kbd> 타워 지도<br>물에서 <kbd>Space</kbd> 떠오르기 · <kbd>C</kbd> 잠수</div>
+</div>
+
+<div class="side">
+  <button class="minimap" id="miniBtn" type="button" aria-label="타워 지도 열기">
+    <span class="label">타워 <span>50F</span></span>
+    <svg id="mini" role="img" aria-label="50층 타워 단면과 현재 위치"></svg>
+    <span class="here" id="miniHere">현재 <b>1F</b> 로비 초원</span>
+    <span class="next" id="miniNext" hidden></span>
+    <span class="open">눌러서 지도 보기</span>
+  </button>
+  <button class="chip" id="qBtn" type="button">그래픽 · 보통</button>
+  <button class="chip" id="vBtn" type="button">시점 · 3인칭</button>
+  <button class="chip" id="sBtn" type="button" aria-pressed="true">소리 · 켜짐</button>
+</div>
+
+<div class="toast off" id="toast"></div>
+<div class="caption" id="caption" aria-live="polite"></div>
+<div class="cross" id="cross" aria-hidden="true"></div>
+<div class="intro" id="intro" hidden>
+  <canvas id="introCanvas"></canvas>
+  <div class="intro-doors" id="introDoors"><i class="dl"></i><i class="dr"></i></div>
+  <button class="intro-prompt" id="introPrompt" type="button">시작하시겠습니까?</button>
+  <button class="intro-skip" id="introSkip" type="button" hidden>건너뛰기 ›</button>
+</div>
+<div class="dialogue" id="dialogue" role="dialog" aria-live="polite">
+  <div class="dlg-name" id="dlgName"></div>
+  <p class="dlg-text" id="dlgText"></p>
+  <button class="dlg-next" id="dlgNext" type="button">다음 ▶</button>
+</div>
+
+<div class="pad" aria-label="이동">
+  <button class="up" data-k="fwd" type="button" aria-label="앞으로">▲</button>
+  <button class="left" data-k="left" type="button" aria-label="왼쪽으로">◀</button>
+  <button class="down" data-k="back" type="button" aria-label="뒤로">▼</button>
+  <button class="right" data-k="right" type="button" aria-label="오른쪽으로">▶</button>
+  <button class="sup" data-k="up" type="button" aria-label="떠오르기">⤒</button>
+  <button class="sdown" data-k="down" type="button" aria-label="잠수">⤓</button>
+</div>
+
+<button class="action" id="action" type="button">차 꺼내기 · E</button>
+
+<div class="fade" id="fade"><span id="fadeText">엘리베이터 이동 중</span></div>
+
+<div class="towermap" id="towerMap" hidden>
+  <div id="tmCanvas"></div>
+  <div class="tm-head">
+    <div>
+      <h2>타워 지도</h2>
+      <p id="tmHint">층을 누르면 그 층의 지도가 보여요</p>
+      <div class="tm-legend">
+        <span><i style="background:#e0683a"></i>지금 있는 층</span>
+        <span><i style="background:#6a675f"></i>열린 층</span>
+        <span><i style="background:#45433e"></i>준비 중</span>
+      </div>
+    </div>
+    <button class="tm-close" id="tmClose" type="button">닫기 ✕</button>
+  </div>
+  <div class="tm-info" id="tmInfo" hidden>
+    <div class="tm-label" id="tmLabel">1F</div>
+    <div class="tm-name" id="tmName">로비 초원</div>
+    <div class="tm-status" id="tmStatus">지금 있는 층이에요</div>
+    <button class="tm-go" id="tmGo" type="button" hidden>이 층으로 이동</button>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script>
+  if (!window.THREE) document.body.insertAdjacentHTML('beforeend', '<div class="err">3D 라이브러리를 불러오지 못했어요. 페이지를 새로고침해 주세요.</div>');
+</script>
+<script src="js/core.js"></script>
+<script src="js/floors/lobby.js"></script>
+<script src="js/floors/bay.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/world.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/props.js"></script>
+<script src="js/fish.js"></script>
+<script src="js/player.js"></script>
+<script src="js/car.js"></script>
+<script src="js/boat.js"></script>
+<script src="js/elevator.js"></script>
+<script src="js/npc.js"></script>
+<script src="js/input.js"></script>
+<script src="js/save.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/towermap.js"></script>
+<script src="js/dialogue.js"></script>
+<script src="js/intro.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
